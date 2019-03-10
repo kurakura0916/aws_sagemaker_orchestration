@@ -1,0 +1,178 @@
+{
+  "Comment": "dev-sagemaker-orchestration flow",
+  "StartAt": "DataChecker",
+  "States": {
+    "DataChecker": {
+      "Comment": "check data",
+      "Type": "Task",
+      "Resource": "${DataCheckerArn}",
+      "InputPath": "$",
+      "ResultPath": "$",
+      "OutputPath": "$",
+      "Next": "DataCheckBranch"
+    },
+    "DataCheckBranch": {
+      "Comment": "check data branch",
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.no_new_data",
+          "BooleanEquals": true,
+          "Next": "NoNewData"
+        },
+        {
+          "Variable": "$.no_new_data",
+          "BooleanEquals": false,
+          "Next": "StartTrainingJob"
+        }
+      ]
+    },
+    "NoNewData": {
+      "Type": "Pass",
+      "End": true
+    },
+    "StartTrainingJob": {
+      "Type": "Task",
+      "Resource": "${StartTrainingJob.Arn}",
+      "ResultPath": "$",
+      "Next": "NotifySlack"
+    },
+    "NotifySlack": {
+      "Type": "Task",
+      "Resource": "${NotifySlack.Arn}",
+      "ResultPath": "$",
+      "Next": "NotifySlackBranch"
+    },
+    "NotifySlackBranch": {
+      "Type": "Choice",
+      "Choices": [{
+        "Or": [{
+            "Variable": "$.status",
+            "StringEquals": "InProgress"
+        },
+          {
+            "Variable": "$.status",
+            "StringEquals": "Creating"
+          },
+          {
+            "Variable": "$.status",
+            "StringEquals": "Updating"
+          }],
+        "Next": "CheckStatusWait"
+      },
+        {
+          "And": [{
+              "Variable": "$.status",
+              "StringEquals": "Failed"
+          },
+            {
+              "Variable": "$.stage",
+              "StringEquals": "Training"
+            }],
+          "Next": "JobFailed"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "Completed",
+          "Next": "JobCompleted"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "InService",
+          "Next": "DeploymentCompleted"
+        },
+        {
+          "And": [{
+            "Or": [{
+              "Variable": "$.status",
+              "StringEquals": "Failed"
+            },
+              {
+                "Variable": "$.status",
+                "StringEquals": "RollingBack"
+              }
+            ]
+          },
+            {
+              "Variable": "$.stage",
+              "StringEquals": "Deployment"
+            }
+          ],
+          "Next": "DeploymentFailed"
+        }
+      ]
+    },
+    "CheckStatusWait": {
+      "Type": "Wait",
+      "Seconds": 60,
+      "Next": "GetStatus"
+    },
+    "GetStatus": {
+      "Type": "Task",
+      "Resource": "${GetStatus.Arn}",
+      "ResultPath": "$",
+      "Next": "CheckStatusBranch"
+    },
+    "CheckStatusBranch": {
+      "Type": "Choice",
+      "Choices": [{
+        "Or": [{
+          "Variable": "$.status",
+          "StringEquals": "Completed"
+        },
+          {
+            "Variable": "$.status",
+            "StringEquals": "InService"
+          }],
+        "Next": "NotifySlack"
+      },
+        {
+          "Or": [{
+            "Variable": "$.status",
+            "StringEquals": "InProgress"
+          },
+            {
+              "Variable": "$.status",
+              "StringEquals": "Creating"
+            },
+            {
+              "Variable": "$.status",
+              "StringEquals": "Updating"
+            }],
+          "Next": "CheckStatusWait"
+        },
+        {
+          "Or": [{
+            "Variable": "$.status",
+            "StringEquals": "Failed"
+          },
+            {
+              "Variable": "$.status",
+              "StringEquals": "RollingBack"
+            }
+          ],
+          "Next": "NotifySlack"
+        }
+      ]
+    },
+    "JobFailed": {
+      "Type": "Fail"
+    },
+    "JobCompleted": {
+      "Type": "Pass",
+      "Next": "DeployModel"
+    },
+    "DeployModel": {
+      "Type": "Task",
+      "Resource": "${DeployModel.Arn}",
+      "Next": "NotifySlack"
+    },
+    "DeploymentCompleted": {
+      "Type": "Pass",
+      "End": true
+    },
+    "DeploymentFailed": {
+      "Type": "Fail"
+    }
+  }
+}
